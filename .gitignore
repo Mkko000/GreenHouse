@@ -1,0 +1,6 @@
+firmware/greenhouse_esp32cam/secrets.h
+build/
+*.bin
+*.elf
+.vscode/
+.DS_Store

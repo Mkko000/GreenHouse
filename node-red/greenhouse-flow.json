@@ -1,0 +1,779 @@
+[
+  {
+    "id": "gh.broker",
+    "type": "mqtt-broker",
+    "name": "Local Mosquitto",
+    "broker": "localhost",
+    "port": "1883",
+    "clientid": "",
+    "autoConnect": true,
+    "usetls": false,
+    "protocolVersion": "4",
+    "keepalive": "60",
+    "cleansession": true,
+    "autoUnsubscribe": true,
+    "birthTopic": "",
+    "birthQos": "0",
+    "birthRetain": "false",
+    "birthPayload": "",
+    "birthMsg": {},
+    "closeTopic": "",
+    "closeQos": "0",
+    "closeRetain": "false",
+    "closePayload": "",
+    "closeMsg": {},
+    "willTopic": "",
+    "willQos": "0",
+    "willRetain": "false",
+    "willPayload": "",
+    "willMsg": {},
+    "userProps": "",
+    "sessionExpiry": ""
+  },
+  {
+    "id": "gh.ui",
+    "type": "ui-base",
+    "name": "Smart Greenhouse",
+    "path": "/dashboard",
+    "appIcon": "",
+    "includeClientData": true,
+    "acceptsClientConfig": [
+      "ui-notification",
+      "ui-control"
+    ],
+    "showPathInSidebar": false,
+    "headerContent": "page",
+    "navigationStyle": "default",
+    "titleBarStyle": "default",
+    "showReconnectNotification": true,
+    "notificationDisplayTime": 1,
+    "showDisconnectNotification": true,
+    "allowInstall": false
+  },
+  {
+    "id": "gh.theme",
+    "type": "ui-theme",
+    "name": "Greenhouse",
+    "colors": {
+      "surface": "#1b5e20",
+      "primary": "#2e7d32",
+      "bgPage": "#f1f8e9",
+      "groupBg": "#ffffff",
+      "groupOutline": "#c5e1a5"
+    },
+    "sizes": {
+      "density": "default",
+      "pagePadding": "12px",
+      "groupGap": "12px",
+      "groupBorderRadius": "8px",
+      "widgetGap": "12px"
+    }
+  },
+  {
+    "id": "gh.page",
+    "type": "ui-page",
+    "name": "Greenhouse",
+    "ui": "gh.ui",
+    "path": "/greenhouse",
+    "icon": "sprout",
+    "layout": "grid",
+    "theme": "gh.theme",
+    "breakpoints": [
+      {
+        "name": "Default",
+        "px": 0,
+        "cols": 3
+      },
+      {
+        "name": "Tablet",
+        "px": 576,
+        "cols": 6
+      },
+      {
+        "name": "Small Desktop",
+        "px": 768,
+        "cols": 9
+      },
+      {
+        "name": "Desktop",
+        "px": 1024,
+        "cols": 12
+      }
+    ],
+    "order": 1,
+    "className": "",
+    "visible": "true",
+    "disabled": "false"
+  },
+  {
+    "id": "gh.g.readings",
+    "type": "ui-group",
+    "name": "Live readings",
+    "page": "gh.page",
+    "width": "12",
+    "height": "1",
+    "order": 1,
+    "showTitle": true,
+    "className": "",
+    "visible": "true",
+    "disabled": "false",
+    "groupType": "default"
+  },
+  {
+    "id": "gh.g.history",
+    "type": "ui-group",
+    "name": "History (last 24 h)",
+    "page": "gh.page",
+    "width": "8",
+    "height": "1",
+    "order": 2,
+    "showTitle": true,
+    "className": "",
+    "visible": "true",
+    "disabled": "false",
+    "groupType": "default"
+  },
+  {
+    "id": "gh.g.controls",
+    "type": "ui-group",
+    "name": "Controls",
+    "page": "gh.page",
+    "width": "4",
+    "height": "1",
+    "order": 3,
+    "showTitle": true,
+    "className": "",
+    "visible": "true",
+    "disabled": "false",
+    "groupType": "default"
+  },
+  {
+    "id": "gh.tab",
+    "type": "tab",
+    "label": "Smart Greenhouse",
+    "disabled": false,
+    "info": "MQTT dashboard for the Smart Greenhouse (Arduino UNO + ESP32-CAM).\n\n- Subscribes to `greenhouse/state` (JSON) and `greenhouse/availability`.\n- Publishes commands to `greenhouse/cmd`.\n\nOpen the dashboard at http://<node-red-host>:1880/dashboard/greenhouse",
+    "env": [
+      {
+        "name": "ALERT_TEMP_C",
+        "value": "35",
+        "type": "num"
+      },
+      {
+        "name": "ALERT_SOIL_PCT",
+        "value": "20",
+        "type": "num"
+      }
+    ]
+  },
+  {
+    "id": "gh.in.state",
+    "type": "mqtt in",
+    "name": "greenhouse/state",
+    "topic": "greenhouse/state",
+    "qos": "1",
+    "datatype": "json",
+    "broker": "gh.broker",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "wires": [
+      [
+        "gh.fn.split"
+      ]
+    ],
+    "z": "gh.tab",
+    "x": 150,
+    "y": 160
+  },
+  {
+    "id": "gh.fn.split",
+    "type": "function",
+    "name": "Split state",
+    "func": "// Fan the JSON state out to the widgets. Output order:\n// 1 temperature · 2 humidity · 3 soil · 4 light · 5 chart · 6 pump · 7 fans · 8 lights · 9 mode · 10 alerts\nconst s = msg.payload;\nif (typeof s !== 'object' || s === null) return null;\n\nconst isNum = (v) => typeof v === 'number' && Number.isFinite(v);\nconst reading = (v) => (isNum(v) ? { payload: v } : null);\n\nconst chart = [];\nif (isNum(s.temperature)) chart.push({ topic: 'Temperature (°C)', payload: s.temperature });\nif (isNum(s.humidity)) chart.push({ topic: 'Humidity (%)', payload: s.humidity });\n\n// Alerts fire once when a problem starts, not on every update.\nconst alerts = [];\nfunction edge(key, active, text) {\n    const was = context.get(key) || false;\n    if (active && !was) alerts.push({ payload: text });\n    context.set(key, active);\n}\nedge('hot', isNum(s.temperature) && s.temperature >= env.get('ALERT_TEMP_C'), `High temperature: ${s.temperature} °C`);\nedge('dry', isNum(s.soil) && s.soil <= env.get('ALERT_SOIL_PCT'), `Soil is very dry: ${s.soil} %`);\nedge('offline', s.online === false, 'Arduino link lost — check the UART wiring');\nedge('sensor', s.online === true && !isNum(s.temperature), 'DHT22 sensor error');\n\nconst mode = s.online === false ? 'Arduino offline' : (s.auto ? 'AUTO' : 'MANUAL');\n\nreturn [\n    reading(s.temperature),\n    reading(s.humidity),\n    reading(s.soil),\n    reading(s.light),\n    chart,\n    { payload: !!s.pump },\n    { payload: !!s.fan },\n    { payload: !!s.leds },\n    { payload: mode },\n    alerts\n];\n",
+    "outputs": 10,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "env": [],
+    "wires": [
+      [
+        "gh.g.temp"
+      ],
+      [
+        "gh.g.hum"
+      ],
+      [
+        "gh.g.soil"
+      ],
+      [
+        "gh.g.light"
+      ],
+      [
+        "gh.chart"
+      ],
+      [
+        "gh.sw.pump"
+      ],
+      [
+        "gh.sw.fan"
+      ],
+      [
+        "gh.sw.leds"
+      ],
+      [
+        "gh.txt.mode"
+      ],
+      [
+        "gh.notify"
+      ]
+    ],
+    "z": "gh.tab",
+    "x": 390,
+    "y": 220
+  },
+  {
+    "id": "gh.g.temp",
+    "type": "ui-gauge",
+    "name": "Temperature",
+    "group": "gh.g.readings",
+    "order": 1,
+    "value": "payload",
+    "valueType": "msg",
+    "width": 3,
+    "height": 3,
+    "gtype": "gauge-half",
+    "gstyle": "rounded",
+    "title": "Temperature",
+    "alwaysShowTitle": false,
+    "floatingTitlePosition": "top-left",
+    "units": "°C",
+    "icon": "",
+    "prefix": "",
+    "suffix": "",
+    "segments": [
+      {
+        "from": "0",
+        "color": "#29b6f6"
+      },
+      {
+        "from": "18",
+        "color": "#66bb6a"
+      },
+      {
+        "from": "30",
+        "color": "#ffa726"
+      },
+      {
+        "from": "35",
+        "color": "#ef5350"
+      }
+    ],
+    "min": 0,
+    "max": 50,
+    "sizeThickness": 16,
+    "sizeGap": 4,
+    "sizeKeyThickness": 8,
+    "styleRounded": true,
+    "styleGlow": false,
+    "className": "",
+    "wires": [],
+    "z": "gh.tab",
+    "x": 700,
+    "y": 40
+  },
+  {
+    "id": "gh.g.hum",
+    "type": "ui-gauge",
+    "name": "Humidity",
+    "group": "gh.g.readings",
+    "order": 2,
+    "value": "payload",
+    "valueType": "msg",
+    "width": 3,
+    "height": 3,
+    "gtype": "gauge-half",
+    "gstyle": "rounded",
+    "title": "Humidity",
+    "alwaysShowTitle": false,
+    "floatingTitlePosition": "top-left",
+    "units": "%",
+    "icon": "",
+    "prefix": "",
+    "suffix": "",
+    "segments": [
+      {
+        "from": "0",
+        "color": "#ffa726"
+      },
+      {
+        "from": "30",
+        "color": "#66bb6a"
+      },
+      {
+        "from": "80",
+        "color": "#29b6f6"
+      }
+    ],
+    "min": 0,
+    "max": 100,
+    "sizeThickness": 16,
+    "sizeGap": 4,
+    "sizeKeyThickness": 8,
+    "styleRounded": true,
+    "styleGlow": false,
+    "className": "",
+    "wires": [],
+    "z": "gh.tab",
+    "x": 700,
+    "y": 80
+  },
+  {
+    "id": "gh.g.soil",
+    "type": "ui-gauge",
+    "name": "Soil moisture",
+    "group": "gh.g.readings",
+    "order": 3,
+    "value": "payload",
+    "valueType": "msg",
+    "width": 3,
+    "height": 3,
+    "gtype": "gauge-half",
+    "gstyle": "rounded",
+    "title": "Soil moisture",
+    "alwaysShowTitle": false,
+    "floatingTitlePosition": "top-left",
+    "units": "%",
+    "icon": "",
+    "prefix": "",
+    "suffix": "",
+    "segments": [
+      {
+        "from": "0",
+        "color": "#ef5350"
+      },
+      {
+        "from": "30",
+        "color": "#ffa726"
+      },
+      {
+        "from": "45",
+        "color": "#66bb6a"
+      }
+    ],
+    "min": 0,
+    "max": 100,
+    "sizeThickness": 16,
+    "sizeGap": 4,
+    "sizeKeyThickness": 8,
+    "styleRounded": true,
+    "styleGlow": false,
+    "className": "",
+    "wires": [],
+    "z": "gh.tab",
+    "x": 700,
+    "y": 120
+  },
+  {
+    "id": "gh.g.light",
+    "type": "ui-gauge",
+    "name": "Light",
+    "group": "gh.g.readings",
+    "order": 4,
+    "value": "payload",
+    "valueType": "msg",
+    "width": 3,
+    "height": 3,
+    "gtype": "gauge-half",
+    "gstyle": "rounded",
+    "title": "Light",
+    "alwaysShowTitle": false,
+    "floatingTitlePosition": "top-left",
+    "units": "",
+    "icon": "",
+    "prefix": "",
+    "suffix": "",
+    "segments": [
+      {
+        "from": "0",
+        "color": "#78909c"
+      },
+      {
+        "from": "300",
+        "color": "#fdd835"
+      }
+    ],
+    "min": 0,
+    "max": 1023,
+    "sizeThickness": 16,
+    "sizeGap": 4,
+    "sizeKeyThickness": 8,
+    "styleRounded": true,
+    "styleGlow": false,
+    "className": "",
+    "wires": [],
+    "z": "gh.tab",
+    "x": 700,
+    "y": 160
+  },
+  {
+    "id": "gh.chart",
+    "type": "ui-chart",
+    "group": "gh.g.history",
+    "name": "Temperature & humidity",
+    "label": "Temperature & humidity",
+    "order": 1,
+    "chartType": "line",
+    "category": "topic",
+    "categoryType": "msg",
+    "xAxisLabel": "",
+    "xAxisProperty": "",
+    "xAxisPropertyType": "timestamp",
+    "xAxisType": "time",
+    "xAxisFormat": "",
+    "xAxisFormatType": "auto",
+    "xmin": "",
+    "xmax": "",
+    "yAxisLabel": "",
+    "yAxisProperty": "payload",
+    "yAxisPropertyType": "msg",
+    "ymin": "",
+    "ymax": "",
+    "bins": 10,
+    "action": "append",
+    "stackSeries": false,
+    "pointShape": "false",
+    "pointRadius": 4,
+    "showLegend": true,
+    "removeOlder": "24",
+    "removeOlderUnit": "3600",
+    "removeOlderPoints": "2000",
+    "colors": [
+      "#ef5350",
+      "#29b6f6",
+      "#66bb6a",
+      "#ffa726",
+      "#ab47bc",
+      "#26a69a",
+      "#8d6e63",
+      "#78909c",
+      "#ec407a"
+    ],
+    "textColor": [
+      "#666666"
+    ],
+    "textColorDefault": true,
+    "gridColor": [
+      "#e5e5e5"
+    ],
+    "gridColorDefault": true,
+    "width": 8,
+    "height": 6,
+    "className": "",
+    "interpolation": "smooth",
+    "wires": [
+      []
+    ],
+    "z": "gh.tab",
+    "x": 700,
+    "y": 200
+  },
+  {
+    "id": "gh.sw.pump",
+    "type": "ui-switch",
+    "name": "Water pump",
+    "label": "Water pump",
+    "group": "gh.g.controls",
+    "order": 2,
+    "width": 4,
+    "height": 1,
+    "passthru": false,
+    "decouple": false,
+    "topic": "PUMP",
+    "topicType": "str",
+    "style": "",
+    "className": "",
+    "layout": "row-spread",
+    "clickableArea": "line",
+    "onvalue": "true",
+    "onvalueType": "bool",
+    "onicon": "",
+    "oncolor": "",
+    "offvalue": "false",
+    "offvalueType": "bool",
+    "officon": "",
+    "offcolor": "",
+    "wires": [
+      [
+        "gh.fn.cmd"
+      ]
+    ],
+    "z": "gh.tab",
+    "x": 700,
+    "y": 260
+  },
+  {
+    "id": "gh.sw.fan",
+    "type": "ui-switch",
+    "name": "Fans",
+    "label": "Fans",
+    "group": "gh.g.controls",
+    "order": 3,
+    "width": 4,
+    "height": 1,
+    "passthru": false,
+    "decouple": false,
+    "topic": "FAN",
+    "topicType": "str",
+    "style": "",
+    "className": "",
+    "layout": "row-spread",
+    "clickableArea": "line",
+    "onvalue": "true",
+    "onvalueType": "bool",
+    "onicon": "",
+    "oncolor": "",
+    "offvalue": "false",
+    "offvalueType": "bool",
+    "officon": "",
+    "offcolor": "",
+    "wires": [
+      [
+        "gh.fn.cmd"
+      ]
+    ],
+    "z": "gh.tab",
+    "x": 700,
+    "y": 300
+  },
+  {
+    "id": "gh.sw.leds",
+    "type": "ui-switch",
+    "name": "Grow lights",
+    "label": "Grow lights",
+    "group": "gh.g.controls",
+    "order": 4,
+    "width": 4,
+    "height": 1,
+    "passthru": false,
+    "decouple": false,
+    "topic": "LED",
+    "topicType": "str",
+    "style": "",
+    "className": "",
+    "layout": "row-spread",
+    "clickableArea": "line",
+    "onvalue": "true",
+    "onvalueType": "bool",
+    "onicon": "",
+    "oncolor": "",
+    "offvalue": "false",
+    "offvalueType": "bool",
+    "officon": "",
+    "offcolor": "",
+    "wires": [
+      [
+        "gh.fn.cmd"
+      ]
+    ],
+    "z": "gh.tab",
+    "x": 700,
+    "y": 340
+  },
+  {
+    "id": "gh.txt.mode",
+    "type": "ui-text",
+    "group": "gh.g.controls",
+    "order": 1,
+    "width": 4,
+    "height": 1,
+    "name": "Mode",
+    "label": "Mode",
+    "format": "{{msg.payload}}",
+    "layout": "row-spread",
+    "style": false,
+    "font": "",
+    "fontSize": 16,
+    "color": "#717171",
+    "wrapText": false,
+    "className": "",
+    "value": "payload",
+    "valueType": "msg",
+    "wires": [],
+    "z": "gh.tab",
+    "x": 700,
+    "y": 380
+  },
+  {
+    "id": "gh.btn.auto",
+    "type": "ui-button",
+    "group": "gh.g.controls",
+    "name": "Auto mode",
+    "label": "Back to AUTO mode",
+    "order": 5,
+    "width": 4,
+    "height": 1,
+    "emulateClick": false,
+    "tooltip": "",
+    "color": "",
+    "bgcolor": "",
+    "className": "",
+    "icon": "autorenew",
+    "iconPosition": "left",
+    "payload": "AUTO",
+    "payloadType": "str",
+    "topic": "greenhouse/cmd",
+    "topicType": "str",
+    "buttonColor": "",
+    "textColor": "",
+    "iconColor": "",
+    "enableClick": true,
+    "enablePointerdown": false,
+    "pointerdownPayload": "",
+    "pointerdownPayloadType": "str",
+    "enablePointerup": false,
+    "pointerupPayload": "",
+    "pointerupPayloadType": "str",
+    "wires": [
+      [
+        "gh.out.cmd"
+      ]
+    ],
+    "z": "gh.tab",
+    "x": 700,
+    "y": 440
+  },
+  {
+    "id": "gh.txt.esp",
+    "type": "ui-text",
+    "group": "gh.g.controls",
+    "order": 6,
+    "width": 4,
+    "height": 1,
+    "name": "ESP32",
+    "label": "ESP32-CAM",
+    "format": "{{msg.payload}}",
+    "layout": "row-spread",
+    "style": false,
+    "font": "",
+    "fontSize": 16,
+    "color": "#717171",
+    "wrapText": false,
+    "className": "",
+    "value": "payload",
+    "valueType": "msg",
+    "wires": [],
+    "z": "gh.tab",
+    "x": 700,
+    "y": 520
+  },
+  {
+    "id": "gh.fn.cmd",
+    "type": "function",
+    "name": "To command",
+    "func": "// Switch toggled by the user → \"PUMP_ON\" / \"FAN_OFF\" / ... on greenhouse/cmd\nmsg.payload = `${msg.topic}_${msg.payload ? 'ON' : 'OFF'}`;\nmsg.topic = 'greenhouse/cmd';\nreturn msg;\n",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "env": [],
+    "wires": [
+      [
+        "gh.out.cmd"
+      ]
+    ],
+    "z": "gh.tab",
+    "x": 930,
+    "y": 300
+  },
+  {
+    "id": "gh.out.cmd",
+    "type": "mqtt out",
+    "name": "greenhouse/cmd",
+    "topic": "greenhouse/cmd",
+    "qos": "1",
+    "retain": "false",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "gh.broker",
+    "wires": [],
+    "z": "gh.tab",
+    "x": 1150,
+    "y": 360
+  },
+  {
+    "id": "gh.in.avail",
+    "type": "mqtt in",
+    "name": "greenhouse/availability",
+    "topic": "greenhouse/availability",
+    "qos": "1",
+    "datatype": "utf8",
+    "broker": "gh.broker",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "wires": [
+      [
+        "gh.fn.avail"
+      ]
+    ],
+    "z": "gh.tab",
+    "x": 170,
+    "y": 520
+  },
+  {
+    "id": "gh.fn.avail",
+    "type": "function",
+    "name": "Availability",
+    "func": "// ESP32 availability (MQTT last will): show it, and alert when it drops.\nconst online = msg.payload === 'online';\nconst was = context.get('online');\ncontext.set('online', online);\nconst text = { payload: online ? 'Online' : 'Offline' };\nconst alert = (was === true && !online) ? { payload: 'ESP32-CAM went offline' } : null;\nreturn [text, alert];\n",
+    "outputs": 2,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "env": [],
+    "wires": [
+      [
+        "gh.txt.esp"
+      ],
+      [
+        "gh.notify"
+      ]
+    ],
+    "z": "gh.tab",
+    "x": 410,
+    "y": 520
+  },
+  {
+    "id": "gh.notify",
+    "type": "ui-notification",
+    "ui": "gh.ui",
+    "position": "top right",
+    "colorDefault": false,
+    "color": "#ef5350",
+    "displayTime": "6",
+    "showCountdown": true,
+    "outputs": 0,
+    "allowDismiss": true,
+    "dismissText": "Close",
+    "allowConfirm": false,
+    "confirmText": "Confirm",
+    "raw": false,
+    "className": "",
+    "name": "Alerts",
+    "wires": [],
+    "z": "gh.tab",
+    "x": 940,
+    "y": 560
+  }
+]
